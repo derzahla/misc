@@ -2,8 +2,11 @@
 
 _hours=24
 
-help_msg() {
-  printf "Usage: $0 [-h <previous_hours>] [-b <binary_name>]\n\n"
+usage() {
+  printf "Usage: $0 [-n -x -t] [-h <previous_hours>] [-b <binary_name>]\n\n"
+  printf "    -n                 Non-interactive mode, output only a list of denials in specified time range\n"
+  printf "    -x                 Non-interactive mode, output a list of denials with verbose explainations\n"
+  printf "    -t                 Non-interactive mode, output the text for an SELinux template that will allow all returned denials\n"
   printf "    previous_hours     Number of hours to search backward through audit history for denials (default: $_hours)\n"
   printf "    binary_name        Filter the denial list by the name of the binary that triggered it (default: include all binaries))\n\n"
 }
@@ -11,21 +14,35 @@ help_msg() {
 _binary=""
 
 #Check cmdline options - set variables accordingly
-while getopts "h:b:" _opt; do
+while getopts ":nxth:b:" _opt; do
   case $_opt in
+    n) _nomenu=1 ;;
+    x) _nomenux=1 ;;
+    t) _nomenut=1 ;;
     h) _hours=$OPTARG ;;
-    b) _binary="-x $OPTARG" ;;
-    \?) help_msg && exit 1;;
+    b) _binary="-c $OPTARG" ;;
+    \?) usage && exit 1;;
   esac
 done
 
-_previous_date=$(date -u -d "-${_hours} hour" +%m/%d/%y\ %H:%M:%S)
+_previous_date=$(date -d "-${_hours} hour" +%m/%d/%Y\ %H:%M:%S)
 
-echo "Auditing from : $_previous_date                                                                  "
-echo "-----------------------------------------"
+printf "#\n# Using auditd data from $_previous_date and newer...\n#"
 
 #Search for SELinux denials in the last 24 hours or number specified by -h option
-_audit_results=$(ausearch -m avc -sv no -l -i -ts ${_previous_date} ${_binary})
+_audit_results=$(ausearch -m avc -l -i -ts ${_previous_date} ${_binary})
+
+# If _nomenux and/or _nomenu is set, dump results and exit
+if ((_nomenut)) ; then
+  cat <( echo "$_audit_results") | audit2allow
+  exit 0
+elif ((_nomenux)) ; then
+  cat <( echo "$_audit_results") | audit2why -e
+  exit 0
+elif ((_nomenu)); then
+  cat <( echo "$_audit_results")
+  exit 0
+fi
 
 #Set up temp files
 _tmpf=$(mktemp)
@@ -36,7 +53,7 @@ cat <( echo "$_audit_results") > $_tmpf
 
 #Declare menu function
 menu_msg() {
-  printf "\nEnter selection: (E)dit audit results, e(X)plain denials, (V)iew module template, (C)ompile module pp, (R)evert audit results\n" 
+  printf "\nEnter selection: (E)dit audit results, e(X)plain denials, (V)iew module template, (C)ompile module pp, (R)evert audit results or CTRL-C to exit\n" 
   read -N 1 -s -p ":> " _response
   case "$_response" in
     E)
@@ -47,7 +64,7 @@ menu_msg() {
       ;;
     X)
       #Explain in further detail the SELinux denials from audit results
-      audit2why -i $_tmpf | less
+      audit2why -w -e -i $_tmpf | less
       menu_msg
       ;;
     V)
