@@ -1,0 +1,42 @@
+module csx-tests 1.0;
+
+require {
+	type init_t;
+	type var_t;
+	type cluster_t;
+	type spc_t;
+	type cluster_tmpfs_t;
+	type sssd_public_t;
+	type container_file_t;
+	type user_home_t;
+	type container_t;
+	type iscsid_t;
+	type lldpad_t;
+	type neutron_t;
+	type sssd_t;
+	class dir { search write add_name };
+	class unix_stream_socket connectto;
+	class file { getattr ioctl open read write };
+	class process { getpgid setcap };
+}
+
+#============= container_t ==============
+allow container_t init_t:dir search;
+allow container_t var_t:dir ( add_name write };
+allow container_t cluster_t:unix_stream_socket connectto;
+allow container_t spc_t:file getattr;
+allow container_t var_t:file { ioctl open read write };
+allow container_t cluster_tmpfs_t:file { open read write };
+allow container_t sssd_public_t:file { open read };
+
+#============= iscsid_t ==============
+allow iscsid_t container_file_t:dir search;
+
+#============= lldpad_t ==============
+allow lldpad_t self:process setcap;
+
+#============= neutron_t ==============
+allow neutron_t init_t:process getpgid;
+
+#============= sssd_t ==============
+allow sssd_t user_home_t:file read;
