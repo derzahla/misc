@@ -1,0 +1,17 @@
+module csx_el8_9_rhsmcertd-worker 1.0;
+
+require {
+    type user_tmp_t;
+    type rhsmcertd_t;
+    type kernel_t;
+    class system module_request;
+    class dir { add_name create read remove_name rmdir };
+    class file { create open setattr unlink };
+}
+
+#============= rhsmcertd_t ==============
+
+#!!!! This avc can be allowed using the boolean 'domain_kernel_load_modules'
+allow rhsmcertd_t kernel_t:system module_request;
+allow rhsmcertd_t user_tmp_t:dir { add_name create read remove_name rmdir };
+allow rhsmcertd_t user_tmp_t:file { create open setattr unlink };

@@ -1,0 +1,11 @@
+  - name: Build and install pp
+    block:
+      - name: "Compile {{ item }}.te to mod"
+        ansible.builtin.command: /usr/bin/checkmodule -M -m -o "{{ policy_path }}/{{ item }}.mod" "{{ policy_path}}/{{ item }}.te"
+
+      - name: "Package {{ item }}.mod into pp"
+        ansible.builtin.command: /usr/bin/semodule_package -o "/tmp/{{ item }}.pp" -m "{{ policy_path }}/{{ item }}.mod"
+
+      - name: "Install {{ item }}.pp"
+        become: true
+        ansible.builtin.command: /usr/sbin/semodule -i "/tmp/{{ item }}.pp"

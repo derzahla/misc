@@ -1,5 +1,26 @@
----
- - hosts: all
-   become: yes
-   tasks:
-     - include_tasks: semodule_build.yml
+  - name: initiate env
+    copy:
+      src: /runner/project/generated_policies
+      dest: ./
+    ignore_errors: true
+
+  - name: Set policy_path
+    set_fact: 
+      policy_path: "generated_policies/ptc"
+
+  - name: Find te files in the policy_path for OS version
+    find:
+      paths: "{{ policy_path }}"
+      patterns: "^csx_el.*{{ ansible_distribution_major_version }}_.*.te$"
+      file_type: file
+      use_regex: true
+      recurse: true
+    register: te_files
+
+  - name: Remove extensions
+    set_fact:
+      policy_basename: "{{ te_files.files | map(attribute='path') | map('basename') | map('splitext') | map('first') | list }}"
+
+  - name: Call actions block
+    include_tasks: actions.yml
+    loop: "{{ policy_basename }}"

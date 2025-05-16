@@ -1,25 +1,74 @@
-#!/bin/bash -x
+#!/bin/bash 
+
+MIN_RHEL_VERSION=7.5
+CURRENT_RHEL=$(grep -E '^VERSION_ID=.*' /etc/os-release | cut -d'"' -f2)
+STATUS_LINE="${HOSTNAME}"
+SELINUX_STATUS=$(getenforce)
+PKGS_EL7="libselinux-python"
+PKGS_EL8="python3-libselinux"
+PKGS_ALL="policycoreutils policycoreutils-python setools-console checkpolicy audispd-plugins"
+AUDISPCONFDIR="/etc/audit/plugins.d"
 
 usage() {
   echo "usage: $(basename $0) <report|enable|status>"
-  echo "report: run 'selinux' commands to generate detailed reports"
-  echo "enable: enable 'selinux', NOTE: this requires a reboot before it will be effective."
-  echo "status: print whether selinux and auditd are enabled, and in the case of selinux if it is in enforcing or permissive mode."
+  echo "    report: run 'selinux' commands to generate detailed reports"
+  echo "    enable: ensure all options and services associated with SEL are configured and enabled"
+  echo "    status: print selinux status and mode and whether auditd is enabled."
 }
 
-if [ $# -ne 1 ]; then
-  usage 
-  exit 1
-fi
+selinux_confchk() {
+  case ${MAJOR_VERSION} in
+    7)
+      PKGS_ALL+=" $PKGS_EL7"
+      AUDISPCONFDIR="/etc/audisp/plugins.d"
+    ;;
+    8)
+      PKGS_ALL+=" $PKGS_EL8"	  
+    ;;
+  esac
+
+  printf "Checking for required packages\n"
+  for pkg in ${PKGS_ALL}; do
+      printf "  $pkg...\t\t\t"
+      rpm -qa | grep -q $pkg && printf "present\n" || printf "installing\n" || yum -y install $pkg &>/dev/null 
+#      if [ $? -ne 0 ]; then
+#        echo "Unable to install packages, bailing!"
+#        exit 1
+#      fi
+    done
+  printf "\nChecking auditd status\n"
+  if [ -z "$AUDITD_STATUS" ]; then
+    systemctl enable --now auditd
+    echo "  AuditD has been enabled and started."
+  else
+    echo "  AuditD is currently running."
+  fi
+
+  #Enable auditd-to-syslog plugin
+  _audit_syslogcnf="$AUDISPCONFDIR/syslog.conf"
+  printf "\nChecking for auditd syslog plugin config\n"
+  if [ ! -f "${_audit_syslogcnf}" ]; then
+    echo "  Auditd is not configured to log through syslog, adding config at ${_audit_syslogcnf}"
+    cat << EOF > "${_audit_syslogcnf}"
+active = yes
+direction = out
+path = /sbin/audisp-syslog
+type = always
+args = LOG_INFO LOG_LOCAL2
+format = string
+EOF
+    echo "Restarting auditd..."
+    systemctl condrestart auditd
+  else
+    printf "  ${_audit_syslogcnf} file is already present.\n  NO CHANGES MADE.\n  It looks like auditd syslog plugin already configured. If this is unexpected confirm file contents manually"
+  fi
+     
+}
 
 selinux_reports() {
   echo "----SESTATUS_OUTPUT----"
   # Dump full sestatus
   sestatus 
-
-  # Turn on all AVC Messages for which SELinux currently is "dontaudit"ing.
-  semodule -DB
-
   
   echo "----SEMODULE_LISTINGS---"
   #List all non-base modules
@@ -31,13 +80,10 @@ selinux_reports() {
   semanage boolean --list -C 
 }
 
-MIN_RHEL_VERSION=7.9
-CURRENT_RHEL=$(grep -E '^VERSION_ID=.*' /etc/os-release | cut -d'"' -f2)
-STATUS_LINE="${HOSTNAME}"
-SELINUX_STATUS=$(getenforce)
-PKGS_EL7="libselinux-python"
-PKGS_EL8="python3-libselinux"
-PKGS_ALL="policycoreutils policycoreutils-python setools-console checkpolicy"
+if [ $# -ne 1 ]; then
+  usage 
+  exit 1
+fi
 
 CURRENT_OS=$(grep -E '^ID=.*' /etc/os-release | cut -d'"' -f2)
 if [ x"$CURRENT_OS" != x"rhel" ]; then
@@ -61,71 +107,41 @@ fi
 
 AUDITD_STATUS=$(systemctl is-enabled auditd)
 
-case "$1" in
-  "report"|"enable"|"status")
-    STATUS_LINE+=",${SELINUX_STATUS}"
-    STATUS_LINE+=",${AUDITD_STATUS}"
-    case $1 in
-      "report")
-        if [ ${SELINUX_STATUS} != "Disabled" -a ${AUDITD_STATUS} != "disabled" ]; then
-          selinux_reports
-        else
-          STATUS_LINE+=",SELINUX_${SELINUX_STATUS}_UNABLE_TO_GENERATE_SELINUX_REPORTS"
-        fi
-        echo "${STATUS_LINE}"
-      ;;
-      "status")
-        echo "${STATUS_LINE}"
-      ;;
-      *)
-        usage
-        exit 1
-      ;;
-    esac
-    if [ $1 == "enable" ]; then
-      if [ ${SELINUX_STATUS} == "Disabled" ]; then
-        #Install $PKGS if not already installed
-        for pkg in ${PKGS_ALL}; do
-          rpm -qa | grep -q $pkg || yum -y install $pkg
-          if [ $? -ne 0 ]; then
-            echo "Unable to install packages, bailing!"
-            exit 1
-          fi
-        done
+STATUS_LINE+=",${SELINUX_STATUS}"
+STATUS_LINE+=",${AUDITD_STATUS}"
 
-        if [ ${MAJOR_VERSION} -eq 7 ]; then
-          for pkg in ${PKGS_EL7}; do
-            rpm -qa | grep -q $pkg || yum -y install $pkg
-            if [ $? -ne 0 ]; then
-              echo "Unable to install packages, bailing!"
-              exit 1
-            fi
-          done
-        else
-          for pkg in ${PKGS_EL8}; do
-            rpm -qa | grep -q $pkg || yum -y install $pkg
-            if [ $? -ne 0 ]; then
-              echo "Unable to install packages, bailing!"
-              exit 1
-            fi
-          done
-        fi
-
-        if [ -z "$auditd_status" ]; then
-          systemctl enable --now auditd
-          echo "AuditD has been enabled and started."
-        else
-          echo "AuditD is already running."
-        fi
-
-        echo "SELinux will be enabled permissively on reboot and root filesystem will be relabeled"
-        sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
-        touch /.autorelabel
-      else
-        echo "SELinux already enabled, run the script in report mode."
-        exit 0
-      fi
+case $1 in
+  "report")
+     if [ ${SELINUX_STATUS} != "Disabled" -a ${AUDITD_STATUS} != "disabled" ]; then
+       selinux_reports
+     else
+       STATUS_LINE+=",SELINUX_${SELINUX_STATUS}_UNABLE_TO_GENERATE_SELINUX_REPORTS"
+     fi
+     echo "${STATUS_LINE}"
+  ;;
+  "status")
+    echo "${STATUS_LINE}"
+  ;;
+  "enable")
+    selinux_confchk
+    if [ ${SELINUX_STATUS} == "Disabled" ]; then
+      printf "\nSELinux currently appears to be disabled.\n" 
+      sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
+      touch /.autorelabel
+      echo "It has now been configured to be enabled in Permissive mode rupon next reboot and root filesystem will be relabeled"
+    elif [ ${SELINUX_STATUS} == "Permissive" ]; then
+      printf "\nSELinux already enabled in Permissive mode, for more details run the script in report mode.\n"
+      printf "\tNote: If unexpected avc denials are encountered, filesystem may require relabeling, via 'restorecon' or 'touch /.autorelabel' and rebooting\n"
+    elif [ ${SELINUX_STATUS} == "Enforcing" ]; then
+      printf "\nSELinux is Enabled AND Enforcing, for more details run the script in report mode.\n"
+    else
+      printf "\nError, unexpected SELinux status of ${SELINUX_STATUS}. Aborting\n"
+      exit 1
     fi
+    # Rebuild SEL policy, ensuring dontaudit rules are enabled
+    printf "\nRebuilding SEL policy with default settings\n"
+    semodule -B
+    echo "done"
   ;;
   *)
     usage 

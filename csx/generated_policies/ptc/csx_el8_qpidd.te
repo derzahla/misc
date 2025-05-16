@@ -1,0 +1,15 @@
+module csx_el8_qpidd 1.0;
+
+require {
+        type qpidd_t;
+        type kernel_t;
+        type unreserved_port_t;
+        class tcp_socket { name_bind name_connect };
+        class system module_request;
+}
+
+#============= qpidd_t ==============
+
+#!!!! This avc can be allowed using the boolean 'domain_kernel_load_modules'
+allow qpidd_t kernel_t:system module_request;
+allow qpidd_t unreserved_port_t:tcp_socket { name_bind name_connect };

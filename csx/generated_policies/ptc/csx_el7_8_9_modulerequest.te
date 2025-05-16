@@ -1,9 +1,10 @@
-module csx_el789_netpf10_dontaudit 1.0;
+module csx_el7_8_9_modulerequest 1.0;
 
 require {
     type kernel_t;
+    type domain;
     class system module_request;
 }
 
 # Apply dontaudit rule to any type
-dontaudit * kernel_t:system module_request;
+allow domain kernel_t:system module_request;
