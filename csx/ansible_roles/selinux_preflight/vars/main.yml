@@ -1,0 +1,6 @@
+---
+# vars file 
+pkgs_req: "grubby policycoreutils policycoreutils-python setools-console checkpolicy audispd-plugins"
+pkgs_el7: "libselinux-python"
+pkgs_el8: "python3-libselinux"
+audisp_confdir: "/etc/audit/plugins.d"

@@ -1,0 +1,96 @@
+#  - name: initiate env
+#    copy:
+#      src: /runner/project/generated_policies
+#      dest: ./
+#    ignore_errors: true
+
+#  - name: Set policy_path
+#    set_fact: 
+#      policy_path: "generated_policies/ptc"
+
+  - name: Check if the system is RHEL 7, 8, or 9
+    assert:
+      that:
+        - ansible_distribution == "RedHat"
+        - ansible_distribution_major_version in ['7', '8', '9']
+    fail_msg: "This playbook is only compatible with RHEL 7, 8, or 9. Current distribution is {{ ansible_distribution }} version {{ ansible_distribution_major_version }}"
+    when: ansible_distribution_major_version not in ['7', '8', '9']
+
+  - name: Set el7 specific facts
+    set_fact: 
+      pkgs_req: "{{ pkgs_req | default([]) + pkgs_el7 }}"
+      audisp_confdir: "/etc/audisp/plugins.d"
+    when: ansible_distribution_major_version == '7'
+
+  - name: Set el8 specific facts
+    set_fact: 
+      pkgs_req: "{{ pkgs_req | default([]) + pkgs_el8 }}"
+    when: ansible_distribution_major_version == '8'
+
+  - name: Ensure all packages in pkgs_req list are installed
+    dnf:
+      name: "{{ pkgs_req }}"
+      state: present
+
+  - name: Fail when SELinux is enabled enforcing
+    fail:
+      msg: 
+        - "SELinux is already enabled AND enforcing"
+        - "Error, unexpected SELinux status. Aborting"
+    when: 
+      - ansible_selinux.status == "enabled"
+      - ansible_selinux.mode == "enforcing"
+
+
+  - name: Relabel filesystem on next boot if disabled
+    ansible.builtin.file:
+      path: "/.autorelabel"
+      state: touch
+    when: 
+      - ansible_selinux.status == "disabled"
+
+  - name: Enable SELinux in permissive mode if disabled
+    ansible.posix.selinux:
+      state: permissive
+      policy: targeted
+      update_kernel_param: true
+    when: 
+      - ansible_selinux.status == "disabled"
+
+  - name: Print warning when SELinux is disabled
+    debug:
+      msg: 
+        - "SELinux currently appears to be disabled currently"
+        - "It has now been configured to be enabled in Permissive mode upon next reboot and filesystems will be relabeled"
+    when: 
+      - ansible_selinux.status == "disabled"
+  
+  - name: Print warning when SELinux is enabled permissive
+    debug:
+      msg: 
+        - "SELinux is already enabled in permissive mode"
+        - "Note: If unexpected avc denials are encountered, filesystem may require relabeling, via 'restorecon' or 'touch /.autorelabel' and rebooting"
+    when: 
+      - ansible_selinux.status == "enabled"
+      - ansible_selinux.mode == "permissive"
+
+  - name: Check if syslog.conf exists
+    stat:
+      path: "{{ audisp_confdir }}/syslog.conf"
+    register: audisp_syslog_conf
+
+  - name: Copy audisp syslog plugin config if it does not exist
+    copy:
+      src: audisp-syslog.conf
+      dest: "{{ audisp_confdir }}/syslog.conf"
+      force: no
+    when: not audisp_syslog_conf.stat.exists
+  
+  - name: Ensure audit is enabled and (re)started
+    systemd_service:
+      name: auditd
+      state: restarted
+      enabled: yes
+
+  - name: Ensure SELinux policy is rebuilt to include dontaudit rules
+      command: semodule -B

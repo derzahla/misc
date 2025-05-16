@@ -1,6 +1,6 @@
 galaxy_info:
-  author: James Ziller
-  description: Build and install SEL policy packages from .te's
+  author: James Ziller	
+  description: SELinux config preflight steps
   company: Red Hat
 
   # If the issue tracker for your role is not on github, uncomment the
